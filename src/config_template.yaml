@@ -1,0 +1,36 @@
+api:
+  openai_base_url: http://localhost:8080/v1
+  openai_model: local-model
+settings:
+  enable_thinking: false
+  concurrency:
+    max_concurrent_tasks: 3
+  quotas:
+    # IMPORTANT: Quotas are GLOBAL (shared across ALL agents in the system).
+    # Each key MUST be unique — duplicate YAML keys silently overwrite earlier ones!
+    # The engine auto-injects these as prompt format variables: {key_quota}
+    # e.g. "web_search: 10" becomes {web_search_quota} = 10 in your prompts.
+    # Both flat integers and dict-with-limit are supported.
+    delegate_tasks: 20
+    web_search: 10
+    fetch_url_to_workspace: 20
+    write_workspace_file: 20
+    write_todos: 30
+    read_todos: 30
+    think_tool: 30
+    read_workspace_file:
+      limit: 60
+      rules:
+        max_lines: 400
+    grep_workspace_file:
+      limit: 60
+      rules:
+        max_matches: 15
+    list_workspace_files: 20
+  enable_conversational_memory: true
+  enable_session_persistence: true
+  workspace:
+    type: disk
+    dir: "~/.{APP_NAME}/workspace"
+    session_isolation: true  # Auto-creates timestamped run folders (e.g. run_1748192400/)
+    required_artifact: "final_report.md"
