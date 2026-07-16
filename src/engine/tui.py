@@ -1391,6 +1391,20 @@ async def run_cli(builder, prompt: str = None, prompt_file: str = None, session_
         _write_log()
         elapsed = datetime.now() - start_time
         sys.stdout.write(f"\n\n\033[1mTask completed in {elapsed.total_seconds():.1f} seconds.\033[0m\n")
+
+        # Emit manifest.json for disk-based workspace runs
+        try:
+            from tools.fs import _get_workspace_type, _get_workspace_dir, session_dir_ctx as _sdc
+            if _get_workspace_type() == "disk":
+                _session_dir = _sdc.get()
+                if _session_dir:
+                    _run_dir = os.path.join(_get_workspace_dir(), _session_dir)
+                    from tools.manifest import write_manifest
+                    _manifest_path = write_manifest(_run_dir, topic=prompt or "")
+                    sys.stdout.write(f"\033[2mManifest: {_manifest_path}\033[0m\n")
+        except Exception as _manifest_err:
+            sys.stdout.write(f"\033[2mWarning: manifest not written: {_manifest_err}\033[0m\n")
+
     except Exception as e:
         sys.stdout.write(f"\n\033[91mError:\033[0m {e}\n")
     finally:
