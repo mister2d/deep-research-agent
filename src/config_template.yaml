@@ -27,6 +27,20 @@ settings:
       rules:
         max_matches: 15
     list_workspace_files: 20
+  # web_search: tune the hybrid-web-search pipeline (SearXNG → BM25 → Crawl4AI →
+  # chunk ranking). Each value here is exported to the search subprocess as a
+  # HYBRID_SEARCH_* env var and OVERRIDES the ambient environment. The values
+  # below are DEEP-RESEARCH-grade defaults (crawl more sources, keep more/
+  # lower-scored chunks, longer budget). Remove a key — or the whole section —
+  # to fall back to the skill's own SCOUT-grade defaults (max_crawl_urls: 3,
+  # max_output_chunks: 5, crawl_score_threshold: 0.5, chunk_token_target: 512,
+  # timeout_ms: 8000), which suit quick interactive lookups.
+  web_search:
+    max_crawl_urls: 5           # HYBRID_SEARCH_MAX_CRAWL_URLS — pages to fully crawl
+    max_output_chunks: 8        # HYBRID_SEARCH_MAX_OUTPUT_CHUNKS — ranked chunks returned
+    chunk_token_target: 512     # HYBRID_SEARCH_CHUNK_TOKEN_TARGET — approx tokens per chunk
+    crawl_score_threshold: 0.0  # HYBRID_SEARCH_CRAWL_SCORE_THRESHOLD — min score to crawl (0.0 = crawl all)
+    timeout_ms: 20000           # HYBRID_SEARCH_TIMEOUT_MS — per-request crawl budget
   enable_conversational_memory: true
   enable_session_persistence: true
   workspace:
