@@ -1,3 +1,9 @@
+import os
+import sys
+# Ensure sibling modules (engine, tools, prompts, config) resolve whether launched
+# via `python src/app.py` or the `deep-research-agent` console entry point.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import warnings
 warnings.filterwarnings("ignore", message=".*is experimental and may change.*")
 

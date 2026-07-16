@@ -2,6 +2,45 @@
 
 A hierarchical deep research agent built with the **Microsoft Agent Framework** and **Textual** TUI. Uses a strict 3-tier delegation chain: **Orchestrator → Searcher → Analyzer** to perform web-based research and document analysis while keeping context windows lean for local LLMs.
 
+## Configuration
+
+Endpoints and credentials are supplied via environment variables, loaded from a
+local `.env` file (gitignored). Copy `.env.example` to `.env` and point each
+value at your own infrastructure; `direnv` loads it automatically via `.envrc`
+(`use flake` + `dotenv_if_exists .env`). The flake declares no endpoints, so
+each operator can target their own self-hosted services.
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_BASE` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI-compatible LLM (thinking) endpoint |
+| `SEARXNG_URL` | SearXNG base URL for web search (the app appends `/search`) |
+| `CRAWL4AI_URL` | Self-hosted Crawl4AI REST service (falls back to httpx+BS4 if unset) |
+| `CRAWL4AI_AUTH_TOKEN` | Crawl4AI auth token (defaults to `dummy`) |
+| `TIKA_BASE_URL` | Apache Tika server for PDF/Office/EPUB/RTF/image extraction |
+| `HYBRID_SEARCH_SKILL_DIR` | Directory of the hybrid-web-search skill (`run-json.mjs`) |
+
+### Tuning web search
+
+The hybrid-web-search pipeline (crawl breadth, chunk count/size, score cutoff,
+timeout) can be tuned either from `~/.deep-research-agent/config.yaml` under
+`settings.web_search`, or via ambient `HYBRID_SEARCH_*` environment variables.
+A value set in `config.yaml` overrides the ambient env; when both are silent,
+the skill's own scout-grade defaults apply. The shipped `config_template.yaml`
+enables deep-research-grade defaults (`max_crawl_urls: 5`, `max_output_chunks: 8`,
+`crawl_score_threshold: 0.0`, `timeout_ms: 20000`) — remove the `web_search`
+section to fall back to the skill's leaner scout-grade behavior.
+The mapping is `max_crawl_urls → HYBRID_SEARCH_MAX_CRAWL_URLS`,
+`max_output_chunks → HYBRID_SEARCH_MAX_OUTPUT_CHUNKS`,
+`chunk_token_target → HYBRID_SEARCH_CHUNK_TOKEN_TARGET`,
+`crawl_score_threshold → HYBRID_SEARCH_CRAWL_SCORE_THRESHOLD`,
+`timeout_ms → HYBRID_SEARCH_TIMEOUT_MS`.
+
+Every document the agent writes carries OKF v0.1 YAML frontmatter (title,
+timestamps, type, tags, `sha256` over the body, `okf_version`). Crawled sources
+also record `source_url`, `content_type`, and `ingested`; `final_report.md`
+enumerates its `sources`. Validate a run directory with
+`python eval/validate_okf.py <run_dir>`.
+
 ## Architecture
 
 ```

@@ -1,7 +1,8 @@
 import os
 from agent_framework import tool
 from tools.core import with_quota
-from tools.fs import _get_workspace_type, _get_workspace_dir, get_workspace_file_content, _IN_MEMORY_FS
+from tools.fs import (_get_workspace_type, _get_workspace_dir, _get_safe_path,
+    get_workspace_file_content, _IN_MEMORY_FS, _build_okf_frontmatter)
 
 @tool
 @with_quota
@@ -22,10 +23,15 @@ def write_todos(todos: str) -> str:
         todos: The full todo list string with checkboxes to save.
     """
     try:
-        from tools.fs import _get_safe_path
         path = _get_safe_path("_todos.md")
         if not path:
             return "Error: could not resolve path for _todos.md"
+        todos = _build_okf_frontmatter(
+            todos,
+            title="Research Run Todos",
+            doc_type="log",
+            tags=["todos", "process"],
+        )
         if _get_workspace_type() == "disk":
             parent_dir = os.path.dirname(path)
             if parent_dir:
