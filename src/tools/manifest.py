@@ -80,6 +80,33 @@ def _parse_md_file(path: str) -> Dict[str, Any]:
     return fm or {}
 
 
+def _slugify(text: str, max_words: int = 6, max_len: int = 48) -> str:
+    """Derive a human-friendly slug from a topic: lowercase, hyphenated, truncated."""
+    words = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    slug = "-".join(words[:max_words])[:max_len].strip("-")
+    return slug
+
+
+def _unique_slug(base: str) -> str:
+    """De-duplicate a slug against existing runs.json entries (best-effort read)."""
+    runs_path = Path.home() / ".deep-research-agent" / "runs.json"
+    existing: set = set()
+    try:
+        with open(runs_path, encoding="utf-8") as fh:
+            for e in json.load(fh):
+                s = e.get("slug")
+                if s:
+                    existing.add(s)
+    except (OSError, ValueError):
+        pass
+    if base not in existing:
+        return base
+    n = 2
+    while f"{base}-{n}" in existing:
+        n += 1
+    return f"{base}-{n}"
+
+
 def write_manifest(run_dir: str, topic: str = "") -> str:
     """Build and write <run_dir>/manifest.json, then append to ~/.deep-research-agent/runs.json.
 
@@ -143,10 +170,12 @@ def write_manifest(run_dir: str, topic: str = "") -> str:
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     run_dir_rel = _workspace_rel(run_dir)
+    slug = _unique_slug(_slugify(topic) or run_id)
 
     manifest: Dict[str, Any] = {
         "version": "1.0",
         "run_id": run_id,
+        "slug": slug,
         "run_dir": run_dir_rel,
         "workspace_rel": True,
         "topic": topic,
@@ -170,13 +199,14 @@ def write_manifest(run_dir: str, topic: str = "") -> str:
     # ── Append to ~/.deep-research-agent/runs.json (file-locked) ──────────────
     # Store workspace-relative paths so entries survive worktree→main merges.
     manifest_rel = os.path.join(run_dir_rel, "manifest.json")
-    _append_runs_json(run_id, run_dir_rel, manifest_rel, topic, now_iso)
+    _append_runs_json(run_id, slug, run_dir_rel, manifest_rel, topic, now_iso)
 
     return manifest_path
 
 
 def _append_runs_json(
     run_id: str,
+    slug: str,
     run_dir_rel: str,
     manifest_rel: str,
     topic: str,
@@ -194,6 +224,7 @@ def _append_runs_json(
 
     entry = {
         "run_id": run_id,
+        "slug": slug,
         "run_dir": run_dir_rel,
         "manifest": manifest_rel,
         "workspace_rel": True,
