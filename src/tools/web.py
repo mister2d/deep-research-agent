@@ -1,6 +1,7 @@
 import httpx
 import os
 import re
+import time
 import asyncio
 import threading
 import json
@@ -19,6 +20,19 @@ CRAWL4AI_URL  = os.environ.get("CRAWL4AI_URL", "")
 CRAWL4AI_TOKEN = os.environ.get("CRAWL4AI_AUTH_TOKEN", "")
 _ddgs_lock = threading.Lock()
 _ddgs_client = None
+
+# Retry/backoff for transient failures (HTTP 429 / 5xx / reported rate limiting).
+# TWO retries after the initial attempt, exponential backoff in seconds.
+_RETRY_BACKOFFS = (2, 6)
+
+
+def _is_rate_limit_text(text: str) -> bool:
+    """Heuristic: does this error/output text indicate rate limiting or a transient server error?"""
+    t = (text or "").lower()
+    return ("rate limit" in t or "rate-limit" in t or "ratelimit" in t
+            or "too many requests" in t or "429" in t
+            or "503" in t or "502" in t or "500" in t
+            or "temporarily unavailable" in t or "try again" in t)
 
 def get_ddgs_client():
     global _ddgs_client
@@ -153,18 +167,37 @@ async def web_search(
                     "directory (the one containing run-json.mjs).")
         env = _search_env(os.environ)
         env.setdefault("CRAWL4AI_AUTH_TOKEN", "dummy")
+        # This runs inside asyncio.to_thread, so a blocking time.sleep here does
+        # NOT block the event loop — other coroutines keep running. Retry on
+        # rate-limit / transient failures with exponential backoff.
         try:
-            result = subprocess.run(
-                ["npx", "tsx", "run-json.mjs", query],
-                capture_output=True, text=True, timeout=120,
-                cwd=skill_dir,
-                env=env,
-            )
-            if result.returncode != 0:
-                return f"Search failed: {result.stderr.strip() or 'unknown error'}"
-            data = json.loads(result.stdout.strip())
-            if "error" in data:
-                return f"Search error: {data['error']}"
+            result = None
+            last_err = ""
+            for attempt in range(len(_RETRY_BACKOFFS) + 1):
+                result = subprocess.run(
+                    ["npx", "tsx", "run-json.mjs", query],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=skill_dir,
+                    env=env,
+                )
+                if result.returncode != 0:
+                    last_err = result.stderr.strip() or "unknown error"
+                    if (_is_rate_limit_text(last_err)
+                            and attempt < len(_RETRY_BACKOFFS)):
+                        time.sleep(_RETRY_BACKOFFS[attempt])
+                        continue
+                    return f"Search failed: {last_err}"
+                data = json.loads(result.stdout.strip())
+                if "error" in data:
+                    err = str(data["error"])
+                    if (_is_rate_limit_text(err)
+                            and attempt < len(_RETRY_BACKOFFS)):
+                        time.sleep(_RETRY_BACKOFFS[attempt])
+                        continue
+                    return f"Search error: {err}"
+                break
+            else:
+                return f"Search failed after retries: {last_err or 'rate limited'}"
 
             items = data.get("items", [])
             stats = data.get("stats", {})
@@ -344,15 +377,32 @@ async def _fetch_via_crawl4ai(url: str, filename: str, content_type: str = "text
     def _do_crawl():
         return httpx.post(endpoint, json=payload, headers=headers, timeout=60)
 
-    try:
-        resp = await asyncio.to_thread(_do_crawl)
-    except Exception as e:
-        return f"Failed to reach Crawl4AI at '{endpoint}': {e}"
+    # Retry on transient failures (HTTP 429/5xx). This function is async, so we
+    # await asyncio.sleep for the backoff to avoid blocking the event loop.
+    resp = None
+    last_exc = None
+    for attempt in range(len(_RETRY_BACKOFFS) + 1):
+        try:
+            resp = await asyncio.to_thread(_do_crawl)
+        except Exception as e:
+            last_exc = e
+            if attempt < len(_RETRY_BACKOFFS):
+                await asyncio.sleep(_RETRY_BACKOFFS[attempt])
+                continue
+            return f"Failed to reach Crawl4AI at '{endpoint}': {e}"
+        if (resp.status_code == 429 or 500 <= resp.status_code < 600) \
+                and attempt < len(_RETRY_BACKOFFS):
+            await asyncio.sleep(_RETRY_BACKOFFS[attempt])
+            continue
+        break
+
+    if resp is None:
+        return f"Failed to reach Crawl4AI at '{endpoint}': {last_exc}"
 
     if resp.status_code < 200 or resp.status_code >= 300:
         detail = resp.text[:300].strip()
-        return (f"Crawl4AI request for '{url}' failed: HTTP {resp.status_code}"
-                f"{' — ' + detail if detail else ''}")
+        return (f"Crawl4AI request for '{url}' failed after retries: "
+                f"HTTP {resp.status_code}{' — ' + detail if detail else ''}")
 
     try:
         data = resp.json()
